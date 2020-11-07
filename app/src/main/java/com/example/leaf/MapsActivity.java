@@ -9,8 +9,15 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
 import android.util.Log;
+import android.widget.Toast;
 
 
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -18,13 +25,21 @@ import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.PointOfInterest;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
-public class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
+import org.json.JSONException;
+import org.json.JSONObject;
+
+public class MapsActivity extends FragmentActivity implements OnMapReadyCallback, GoogleMap.OnPoiClickListener {
 
     private GoogleMap map;
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final int PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION = 1;
     private boolean locationPermissionGranted;
     private Location lastKnownLocation;
@@ -92,6 +107,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         updateLocationUI();
         getDeviceLocation();
 
+        map.setOnPoiClickListener(this);
+
         // Add a marker in Sydney and move the camera
         /*
         LatLng sydney = new LatLng(-34, 151);
@@ -99,6 +116,37 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         map.addMarker(new MarkerOptions().position(sydney).title("Marker in Sydney"));
         map.moveCamera(CameraUpdateFactory.newLatLng(sydney));
         */
+    }
+
+    public void placeMarker(Location lastlocal){
+        LatLng local = new LatLng(lastlocal.getLatitude(), lastlocal.getLongitude());
+        Marker vancouver = map.addMarker(
+                new MarkerOptions()
+                        .position(local)
+                        .title("Vancouver")
+                        .snippet("Population: 4,137,400"));
+    }
+
+    public void getPlaceDetails(String placeID){
+        RequestQueue queue = Volley.newRequestQueue(this);
+        String url ="https://maps.googleapis.com/maps/api/place/details/json?placeid=" +
+                placeID + "&key=AIzaSyD9SaBFDamjQ41ZHtP7MvCGk2qPaT-i2dE";
+
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                new Response.Listener<String>() {
+                    @Override
+                    public void onResponse(String response) {
+                        // Display the first 500 characters of the response string.
+                        PlaceDetails placeDetails = GSON.fromJson(response, PlaceDetails.class);
+                        makeToast(placeDetails.result.rating);
+                    }
+                }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                makeToast("That didn't work!");
+            }
+        });
+        queue.add(stringRequest);
     }
 
     private void getLocationPermission() {
@@ -136,6 +184,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                                 map.moveCamera(CameraUpdateFactory.newLatLngZoom(
                                         new LatLng(lastKnownLocation.getLatitude(),
                                                 lastKnownLocation.getLongitude()), DEFAULT_ZOOM));
+                                placeMarker(lastKnownLocation);
                             }
                         } else {
                             Log.d(TAG, "Current location is null. Using defaults.");
@@ -152,5 +201,28 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
     }
 
+    public void makeToast(String whatToSay){
+        Toast.makeText(this, whatToSay,
+                Toast.LENGTH_SHORT).show();
+    }
 
+    public void makeToast(double whatToSay){
+        String result = Double.toString(whatToSay);
+        Toast.makeText(this, result,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    public void onPoiClick(PointOfInterest poi) {
+        String id = poi.placeId;
+        getPlaceDetails(id);
+
+        /*
+        Toast.makeText(this, "Clicked: " +
+                        poi.name + "\nPlace ID:" + poi.placeId +
+                        "\nLatitude:" + poi.latLng.latitude +
+                        " Longitude:" + poi.latLng.longitude,
+                Toast.LENGTH_SHORT).show();
+                */
+    }
 }
