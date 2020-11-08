@@ -4,9 +4,12 @@ import java.util.List;
 
 public class PlaceDetails {
 
-    public List<Result> result;
+    public List<Result> results;
 
     public class Result{
+        transient boolean visited;
+
+        String place_id;
         String name;
         double rating;
         int price_rating;
@@ -20,5 +23,15 @@ public class PlaceDetails {
                 double lng;
             }
         }
+    }
+
+    public boolean setVisited(String placeid){
+        for(Result result: this.results) {
+            if(result.place_id.equals(placeid)) {
+                result.visited = true;
+                return true;
+            }
+        }
+        return false;
     }
 }

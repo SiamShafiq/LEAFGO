@@ -9,6 +9,8 @@ import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.widget.Button;
 import android.widget.Toast;
 
 
@@ -24,19 +26,28 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptor;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.maps.model.PointOfInterest;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.android.libraries.places.api.Places;
+import com.google.android.libraries.places.api.model.Place;
+import com.google.android.libraries.places.api.model.PlaceLikelihood;
+import com.google.android.libraries.places.api.net.FindCurrentPlaceRequest;
+import com.google.android.libraries.places.api.net.FindCurrentPlaceResponse;
+import com.google.android.libraries.places.api.net.PlacesClient;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.util.Arrays;
+import java.util.List;
 
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback, GoogleMap.OnPoiClickListener {
+
 
     private GoogleMap map;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -45,7 +56,18 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     private Location lastKnownLocation;
     private final LatLng defaultLocation = new LatLng(-33.8523341, 151.2106085);
     private static final int DEFAULT_ZOOM = 15;
+
+    private static final int M_MAX_ENTRIES = 20;
+
+    private static String API_KEY = "AIzaSyD9SaBFDamjQ41ZHtP7MvCGk2qPaT-i2dE";
     private static final String TAG = MapsActivity.class.getSimpleName();
+
+    PlaceDetails nearbyPlaces;
+    private PlacesClient placesClient;
+
+
+    private static final String URL_FORMAT = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?" +
+            "location=%s,%s&radius=%s&type=restaurant&key=" + API_KEY;
 
     private FusedLocationProviderClient fusedLocationProviderClient;
 
@@ -55,22 +77,24 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         setContentView(R.layout.activity_maps);
 
         fusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this);
-        // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
 
-        /*
-        // Construct a GeoDataClient.
-        mGeoDataClient = Places.getGeoDataClient(this, null);
+        Places.initialize(getApplicationContext(), API_KEY);
+        placesClient = Places.createClient(this);
 
-        // Construct a PlaceDetectionClient.
-        mPlaceDetectionClient = Places.getPlaceDetectionClient(this, null);
+        Button goButton = (Button) findViewById(R.id.buttonMaps);
+        goButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                updateLocationUI();
+                getDeviceLocation();
+            }
+        });
 
-        // Construct a FusedLocationProviderClient.
-        mFusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this);
-        */
     }
+
+
 
     private void updateLocationUI() {
         if (map == null) {
@@ -107,15 +131,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         updateLocationUI();
         getDeviceLocation();
 
-        map.setOnPoiClickListener(this);
-
-        // Add a marker in Sydney and move the camera
-        /*
-        LatLng sydney = new LatLng(-34, 151);
-
-        map.addMarker(new MarkerOptions().position(sydney).title("Marker in Sydney"));
-        map.moveCamera(CameraUpdateFactory.newLatLng(sydney));
-        */
+//        map.setOnPoiClickListener(this);
     }
 
     public void placeMarker(Location lastlocal){
@@ -138,7 +154,77 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     public void onResponse(String response) {
                         // Display the first 500 characters of the response string.
                         PlaceDetails placeDetails = GSON.fromJson(response, PlaceDetails.class);
-                        makeToast(placeDetails.result.rating);
+                        makeToast("1");
+                    }
+                }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                makeToast("That didn't work!");
+            }
+        });
+        queue.add(stringRequest);
+    }
+
+    public void markCurrentPlace(){
+        if (map == null) {
+            return;
+        }
+
+        if (locationPermissionGranted) {
+            // Use fields to define the data types to return.
+            List<Place.Field> placeFields = Arrays.asList(Place.Field.NAME, Place.Field.ADDRESS,
+                    Place.Field.LAT_LNG, Place.Field.ID);
+
+            // Use the builder to create a FindCurrentPlaceRequest.
+            FindCurrentPlaceRequest request =
+                    FindCurrentPlaceRequest.newInstance(placeFields);
+
+            // Get the likely places - that is, the businesses and other points of interest that
+            // are the best match for the device's current location.
+            @SuppressWarnings("MissingPermission") final
+            Task<FindCurrentPlaceResponse> placeResult =
+                    placesClient.findCurrentPlace(request);
+            placeResult.addOnCompleteListener (new OnCompleteListener<FindCurrentPlaceResponse>() {
+                @Override
+                public void onComplete(@NonNull Task<FindCurrentPlaceResponse> task) {
+                    if (task.isSuccessful() && task.getResult() != null) {
+                        FindCurrentPlaceResponse likelyPlaces = task.getResult();
+
+                        // Set the count, handling cases where less than 5 entries are returned.
+                        int count;
+                        if (likelyPlaces.getPlaceLikelihoods().size() < M_MAX_ENTRIES) {
+                            count = likelyPlaces.getPlaceLikelihoods().size();
+                        } else {
+                            count = M_MAX_ENTRIES;
+                        }
+
+                        int i = 0;
+                        boolean visited = false;
+                        for (PlaceLikelihood placeLikelihood : likelyPlaces.getPlaceLikelihoods()) {
+                            visited = nearbyPlaces.setVisited(placeLikelihood.getPlace().getId());
+
+                            i++;
+                            if (i > (count - 1) || visited) {
+                                break;
+                            }
+                        }
+                    }
+                    else {
+                        Log.e(TAG, "Exception: %s", task.getException());
+                    }
+                }
+            });
+        }
+    }
+
+
+    public void RestaurantLoader(String url){
+        RequestQueue queue = Volley.newRequestQueue(this);
+        StringRequest stringRequest = new StringRequest(Request.Method.GET, url,
+                new Response.Listener<String>() {
+                    @Override
+                    public void onResponse(String response) {
+                        loadNearbyRestaurants(lastKnownLocation, response);
                     }
                 }, new Response.ErrorListener() {
             @Override
@@ -150,11 +236,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
     private void getLocationPermission() {
-        /*
-         * Request location permission, so that we can get the location of the
-         * device. The result of the permission request is handled by a callback,
-         * onRequestPermissionsResult.
-         */
+
         if (ContextCompat.checkSelfPermission(this.getApplicationContext(),
                 android.Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
@@ -167,10 +249,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     }
 
     private void getDeviceLocation() {
-        /*
-         * Get the best and most recent location of the device, which may be null in rare
-         * cases when a location is not available.
-         */
+
         try {
             if (locationPermissionGranted) {
                 Task<Location> locationResult = fusedLocationProviderClient.getLastLocation();
@@ -178,13 +257,18 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     @Override
                     public void onComplete(@NonNull Task<Location> task) {
                         if (task.isSuccessful()) {
-                            // Set the map's camera position to the current location of the device.
                             lastKnownLocation = task.getResult();
                             if (lastKnownLocation != null) {
                                 map.moveCamera(CameraUpdateFactory.newLatLngZoom(
                                         new LatLng(lastKnownLocation.getLatitude(),
                                                 lastKnownLocation.getLongitude()), DEFAULT_ZOOM));
-                                placeMarker(lastKnownLocation);
+
+//                                placeMarker(lastKnownLocation);
+
+                                String url = String.format(URL_FORMAT, lastKnownLocation.getLatitude(),
+                                lastKnownLocation.getLongitude(), 1000);
+                                RestaurantLoader(url);
+
                             }
                         } else {
                             Log.d(TAG, "Current location is null. Using defaults.");
@@ -201,6 +285,43 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
     }
 
+    private void loadNearbyRestaurants(Location lastKnownLocation, String placeDetails) {
+        try {
+            if(nearbyPlaces == null){
+                nearbyPlaces = GSON.fromJson(placeDetails, PlaceDetails.class);
+                Log.i(placeDetails, placeDetails);
+            }
+
+        } catch (Exception e) {
+            Log.e("Exception: %s", e.getMessage(), e);
+        }
+
+        markCurrentPlace();
+        map.clear();
+        for (PlaceDetails.Result place: nearbyPlaces.results) {
+
+            displayPlace(place);
+        }
+    }
+
+    private void displayPlace(PlaceDetails.Result place) {
+        String name = place.name;
+        String rating = Double.toString(place.rating);
+        double lat = place.geometry.location.lat;
+        double lng = place.geometry.location.lng;
+
+        BitmapDescriptor visitedMarker = place.visited ? BitmapDescriptorFactory.defaultMarker()
+                : BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE);
+
+        MarkerOptions markerOptions = new MarkerOptions()
+                .position(new LatLng(lat, lng))
+                .title(name)
+                .snippet( "Rating: " + rating)
+                .icon(visitedMarker);
+
+        map.addMarker(markerOptions);
+    }
+
     public void makeToast(String whatToSay){
         Toast.makeText(this, whatToSay,
                 Toast.LENGTH_SHORT).show();
@@ -214,8 +335,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public void onPoiClick(PointOfInterest poi) {
-        String id = poi.placeId;
-        getPlaceDetails(id);
+//        String id = poi.placeId;
+//        getPlaceDetails(id);
 
         /*
         Toast.makeText(this, "Clicked: " +
